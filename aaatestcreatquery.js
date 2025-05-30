@@ -1,148 +1,136 @@
-/*
- *
- */
-const { alias } = require("./constants");
-
-var createMathTreeString = function(n)
+var createQueryString = function(queryMml)
 {
-  var oneNode = function(n)
-  {
-    if (!n || !n.localName) return '';
+	var backreferenceCounter = 0;
+	var backreferenceNumberDict = {};
 
-    // munderover
-    if (n.localName.match(/munderover/)) {
-      return '/' + alias[n.localName] +
-        '/{' + oneNode(n.childNodes[0]) + '/}' +
-        '/{' + oneNode(n.childNodes[1]) + '/}' +
-        '/{' + oneNode(n.childNodes[2]) + '/}';
-    }
-    // msubsup
-    else if (n.localName.match(/msubsup/)) {
-      return '/' + alias[n.localName] +
-        '/{' + oneNode(n.childNodes[1]) + '/}' +
-        '/{' + oneNode(n.childNodes[2]) + '/}';
-    }
-    // mfrac, mroot, munder, mover
-    else if (n.localName.match(/mfrac|mroot|munder|mover/)) {
-      let args = [];
-      for (let i = 0; i < n.childNodes.length; i++) {
-        const child = n.childNodes[i];
-        if (!child.localName) continue; // テキストノード除外
-        const childStr = oneNode(child);
-        if (childStr === '') continue;  // 空文字も除外
-        args.push(childStr);
-        if (args.length === 2) break;
-      }
-      while (args.length < 2) args.push('');
-      return '/' + alias[n.localName] +
-        '/{' + args[0] + '/}' +
-        '/{' + args[1] + '/}';
-    }
-    // msqrt, mtd
-    else if (n.localName.match(/msqrt|mtd/)) {
-      // 有効なElementノードのみ処理
-      for (let i = 0; i < n.childNodes.length; i++) {
-        const child = n.childNodes[i];
-        if (child.localName) {
-          return '/' + alias[n.localName] + '/{' + oneNode(child) + '/}';
-        }
-      }
-      return '/' + alias[n.localName] + '/{/' + '}';
-    }
-    // msub, msup
-    else if (n.localName.match(/msub|msup/)) {
-      // 2番目の有効なElementノードのみ
-      let count = 0;
-      for (let i = 0; i < n.childNodes.length; i++) {
-        const child = n.childNodes[i];
-        if (!child.localName) continue;
-        count++;
-        if (count === 2) {
-          return '/' + alias[n.localName] + '/{' + oneNode(child) + '/}';
-        }
-      }
-      return '/' + alias[n.localName] + '/{/' + '}';
-    }
-    // mtable, mtr
-    else if (n.localName.match(/mtable|mtr/)) {
-      var mtableXStr = '/' + alias[n.localName];
-      for (var i = 0; i < n.childNodes.length; i++) {
-        const child = n.childNodes[i];
-        if (!child.localName) continue;
-        mtableXStr += '/{' + oneNode(child) + '/}';
-      }
-      return mtableXStr;
-    }
-    // mrow, math
-    else if (n.localName === 'mrow' || n.localName === 'math') {
-      var mrowXStr = '';
-      for (var i = 0; i < n.childNodes.length; i++) {
-        const child = n.childNodes[i];
-        if (!child.localName) continue;
-        mrowXStr += oneNode(child);
-      }
-      return mrowXStr;
-    }
-    // mi, mn, mo
-    else if (n.localName.match(/mi|mn|mo/)) {
-      //console.log('mi/mn/mo childNodes:', n.childNodes);
+	var processSingleElement = function(e)
+	{
+		try
+		{
+			if($(e).hasClass('integration-node'))
+			{
+				var content = '';
+				for(var i=0; i<e.children.length; i++)
+				{
+					content += processSingleElement(e.children[i]);
+				}
+				//
+				return content;
+			}
+			else if($(e).hasClass('structure-node'))
+			{
+				var args = '';
+				var i;
+				if(e.localName.match(/msub|msup|msubsup/)) i=1;
+				else									   i=0;
+				for(; i<e.children.length; i++)
+				{
+					args += '{' + processSingleElement(e.children[i]) + '}';
+				}
+				//
+				return '\\' + e.localName.substring(1) + args;
+			}
+			else if($(e).hasClass('character-node') && ! $(e).hasClass('wildcard') )
+			{
+				return escape(e.firstChild.nodeValue);
+			}
+			else if($(e).hasClass('regular-expression'))
+			{
+				if($(e).hasClass('wildcard'))
+				{
+					return '.';
+				}
+				else if($(e).hasClass('matrix-wildcard'))
+				{
+					return '.+';
+				}
+				else if($(e).hasClass('character-class'))
+				{
+					return '[' + processSingleElement($(e).find('.integration-node')[0]) + ']';
+				}
+				else if($(e).hasClass('negated-character-class'))
+				{
+					return '[^' + processSingleElement($(e).find('.integration-node')[0]) + ']';
+				}
+				else if($(e).hasClass('backreference'))
+				{
+					var number = processSingleElement($(e).find('.integration-node')[0]);
+					return '\\' + backreferenceNumberDict[number];	
+				}
+				else if($(e).hasClass('enclosing-regular-expression'))
+				{
+					backreferenceCounter++;
+					if($(e).hasClass('capturing'))
+						{
+						var backreferenceNumber = $(e).find('.mi-capturing-number')[0].firstChild.nodeValue;
+						backreferenceNumberDict[backreferenceNumber] = backreferenceCounter;
+					}
+					//
+					var content = '';
+					if($(e).hasClass('boolean-or'))
+					{
+						var style = $(e).find('.style-boolean-or')[0];
+						for(var i=0; i<style.children.length; i++)
+						{
+							content += processSingleElement($(style.children[i]).find('.integration-node')[0]) + '|';
+						}
+						content = content.substring(0, content.length-1);
+					}
+					else
+					{
+						content = processSingleElement($(e).find('.integration-node')[0]);
+					}
+					//
+					var regexpString = '(' + content + ')';
+					if($(e).hasClass('more') && $(e).hasClass('zero-or-one'))
+					{
+						regexpString += '*';
+					}
+					else if($(e).hasClass('more'))
+					{
+						regexpString += '+';
+					}
+					else if($(e).hasClass('zero-or-one'))
+					{
+						regexpString += '?';
+					}
+					//
+					return regexpString;
+				}
+				else
+				{
+					var test = e;
+					throw new Error('node...'+e.toString());
+				}
+			}
+			else
+			{
+				if(e.children.length > 1) throw new Error('ignored element has multiple children');
+				return processSingleElement(e.children[0]);
+			}
 
-  let value = '';
-  for (let i = 0; i < n.childNodes.length; i++) {
-    let value = n.textContent ? n.textContent.trim() : '';
-  if (value === '') return '';
-  if (value.match(/[{}\\:]/)) {
-    return '\\' + value;
-  } else {
-    return value;
-  }
-}
-    }
-    
-    // その他
-    else {
-      if (!n.childNodes) return '';
-      for (let i = 0; i < n.childNodes.length; i++) {
-        const child = n.childNodes[i];
-        if (child.localName) return oneNode(child);
-      }
-      return '';
-    }
-  };
+		}catch(e){
+			alert("invailed query");
+		}
 
-  return oneNode(n);
+	}
+
+	return processSingleElement(queryMml);
 };
-module.exports = { createMathTreeString };
 
-// createMathTreeStringT も同様に修正（テキストノード除外）
-var createMathTreeStringT = function(n)
+
+
+//following functions for escaping should be integrated as a class.
+var escape = function(c)
 {
-  var oneNode = function(n)
-  {
-    var mrowXStr = '';
-    if (n.localName === 'mi' || n.localName === 'mn' || n.localName === 'mo') {
-      if (!n.firstChild || !n.firstChild.nodeValue) return '';
-      if (n.firstChild.nodeValue === '>') {
-        return '<' + n.localName + '>' + '&lt;' + '</' + n.localName + '>';
-      } else if (n.firstChild.nodeValue === '<') {
-        return '<' + n.localName + '>' + '&gt;' + '</' + n.localName + '>';
-      } else {
-        return '<' + n.localName + '>' + n.firstChild.nodeValue + '</' + n.localName + '>';
-      }
-    } else {
-      mrowXStr += '<' + n.localName;
-      if (n.localName === 'math') {
-        mrowXStr += ' mathsize="250%" xmlns="http://www.w3.org/1998/Math/MathML"';
-      }
-      mrowXStr += '>';
-      for (var i = 0; i < n.childNodes.length; i++) {
-        const child = n.childNodes[i];
-        if (!child.localName) continue;
-        mrowXStr += oneNode(child);
-      }
-      mrowXStr += '</' + n.localName + '>';
-      return mrowXStr;
-    }
-  };
-  return oneNode(n);
+	var escapeChar = [
+		'.', '*', '+', '?', '|',
+		'(', ')', '[', ']', '{', '}',
+		'^', '&', ';', '\\',
+	];
+	for(var i=0; i<escapeChar.length; i++)
+	{
+		if(c === escapeChar[i]) return '\\' + c;
+	}
+	return c;
 };
