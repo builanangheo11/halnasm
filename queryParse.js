@@ -10,7 +10,7 @@ const { alias, specialCharacters } = require('./constants');
 var queryParse = function()//即時実行される
 {
   /* ****
-   * トークン処理のためのプラあイベートメンバ
+   * トークン処理のためのプライベートメンバ
    * ****/
   var tokens           = []; //パースするトークン列
   var idx              = 0;  //着目しているトークンのインデクス
